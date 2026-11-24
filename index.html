@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7fb">
+  <title>Daylist — To-do list</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #20243a;
+      background: #f6f7fb;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      --muted: #777d91;
+      --line: #e8eaf1;
+      --accent: #6958d8;
+    }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; padding: 48px 20px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .app { width: min(100%, 720px); margin: 0 auto; }
+    .eyebrow { color: var(--accent); font-size: .75rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 8px 0 6px; font-size: clamp(2rem, 6vw, 3rem); letter-spacing: -.055em; }
+    .subtitle { margin: 0; color: var(--muted); }
+    .date { margin: 30px 0 14px; color: var(--muted); font-size: .9rem; }
+    .panel { overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: 0 16px 50px #242b5010; }
+    form { display: flex; gap: 10px; padding: 18px; border-bottom: 1px solid var(--line); }
+    #task-input { min-width: 0; flex: 1; padding: 13px 15px; border: 1px solid var(--line); border-radius: 11px; outline: none; }
+    #task-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #6958d820; }
+    .primary { padding: 0 19px; border: 0; border-radius: 11px; background: var(--accent); color: white; font-weight: 700; }
+    .primary:hover { background: #5847c7; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+    .filters { display: flex; flex-wrap: wrap; gap: 5px; }
+    .filter, .clear { padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: .85rem; }
+    .filter[aria-pressed="true"] { background: #f0edff; color: var(--accent); font-weight: 700; }
+    .clear:hover { color: #c33f58; }
+    #task-list { margin: 0; padding: 4px 18px; list-style: none; }
+    .task { display: flex; align-items: center; gap: 12px; min-height: 62px; border-bottom: 1px solid #f0f1f5; }
+    .task:last-child { border-bottom: 0; }
+    .task-check { width: 19px; height: 19px; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+    .task-text { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    .task.done .task-text { color: #a0a4b2; text-decoration: line-through; }
+    .delete { width: 34px; height: 34px; border: 0; border-radius: 9px; background: transparent; color: #9a9eae; font-size: 1.2rem; }
+    .delete:hover { background: #fff0f2; color: #c33f58; }
+    .empty { padding: 36px 15px; color: var(--muted); text-align: center; }
+    .footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .84rem; }
+    .storage-note { margin: 14px 4px; color: var(--muted); font-size: .8rem; text-align: center; }
+    @media (max-width: 480px) { body { padding: 30px 14px; } form { padding: 13px; } .toolbar, #task-list, .footer { padding-right: 13px; padding-left: 13px; } .primary { padding: 0 14px; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="eyebrow">A little more focus</div>
+      <h1>Daylist</h1>
+      <p class="subtitle">Make room for what matters today.</p>
+      <p class="date" id="today"></p>
+    </header>
+
+    <section class="panel" aria-label="To-do list">
+      <form id="task-form">
+        <label for="task-input" class="visually-hidden" hidden>New task</label>
+        <input id="task-input" type="text" placeholder="What needs to get done?" maxlength="200" autocomplete="off" required>
+        <button class="primary" type="submit">Add task</button>
+      </form>
+      <div class="toolbar">
+        <div class="filters" aria-label="Filter tasks">
+          <button class="filter" type="button" data-filter="all" aria-pressed="true">All</button>
+          <button class="filter" type="button" data-filter="active" aria-pressed="false">Active</button>
+          <button class="filter" type="button" data-filter="completed" aria-pressed="false">Completed</button>
+        </div>
+        <button class="clear" id="clear-completed" type="button">Clear completed</button>
+      </div>
+      <ul id="task-list" aria-live="polite"></ul>
+      <footer class="footer">
+        <span id="remaining">0 tasks left</span>
+        <span>Saved on this device</span>
+      </footer>
+    </section>
+    <p class="storage-note">Your tasks stay in this browser using local storage.</p>
+  </main>
+
+  <script>
+    (() => {
+      const STORAGE_KEY = 'daylist.tasks.v1';
+      const form = document.querySelector('#task-form');
+      const input = document.querySelector('#task-input');
+      const list = document.querySelector('#task-list');
+      const remaining = document.querySelector('#remaining');
+      const filterButtons = [...document.querySelectorAll('.filter')];
+      let filter = 'all';
+      let tasks = loadTasks();
+
+      document.querySelector('#today').textContent = new Intl.DateTimeFormat(undefined, {
+        weekday: 'long', month: 'long', day: 'numeric'
+      }).format(new Date());
+
+      function loadTasks() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+          return Array.isArray(saved) ? saved.filter(task =>
+            task && typeof task.id === 'string' && typeof task.text === 'string' && typeof task.done === 'boolean'
+          ) : [];
+        } catch {
+          return [];
+        }
+      }
+
+      function saveTasks() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+        } catch {
+          // The app remains usable for this visit if browser storage is unavailable.
+        }
+      }
+
+      function render() {
+        list.replaceChildren();
+        const visibleTasks = tasks.filter(task =>
+          filter === 'all' || (filter === 'active' && !task.done) || (filter === 'completed' && task.done)
+        );
+
+        if (visibleTasks.length === 0) {
+          const empty = document.createElement('li');
+          empty.className = 'empty';
+          empty.textContent = tasks.length === 0 ? 'Nothing on your list yet. Add a task to get started.' : `No ${filter} tasks.`;
+          list.append(empty);
+        }
+
+        for (const task of visibleTasks) {
+          const row = document.createElement('li');
+          row.className = `task${task.done ? ' done' : ''}`;
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'task-check';
+          checkbox.checked = task.done;
+          checkbox.setAttribute('aria-label', `${task.done ? 'Mark active' : 'Complete'}: ${task.text}`);
+          checkbox.addEventListener('change', () => {
+            tasks = tasks.map(item => item.id === task.id ? { ...item, done: checkbox.checked } : item);
+            saveTasks();
+            render();
+          });
+
+          const text = document.createElement('span');
+          text.className = 'task-text';
+          text.textContent = task.text;
+
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'delete';
+          remove.textContent = '×';
+          remove.setAttribute('aria-label', `Delete: ${task.text}`);
+          remove.addEventListener('click', () => {
+            tasks = tasks.filter(item => item.id !== task.id);
+            saveTasks();
+            render();
+          });
+
+          row.append(checkbox, text, remove);
+          list.append(row);
+        }
+
+        const count = tasks.filter(task => !task.done).length;
+        remaining.textContent = `${count} ${count === 1 ? 'task' : 'tasks'} left`;
+        filterButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.filter === filter)));
+      }
+
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        tasks.unshift({ id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, text, done: false });
+        input.value = '';
+        filter = 'all';
+        saveTasks();
+        render();
+        input.focus();
+      });
+
+      filterButtons.forEach(button => button.addEventListener('click', () => {
+        filter = button.dataset.filter;
+        render();
+      }));
+
+      document.querySelector('#clear-completed').addEventListener('click', () => {
+        tasks = tasks.filter(task => !task.done);
+        saveTasks();
+        render();
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
